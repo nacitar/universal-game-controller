@@ -35,10 +35,14 @@
 #include <linux/init.h>
 #include <linux/device.h>
 
+#include "controller_id.h"
+
 MODULE_AUTHOR("Jacob McIntosh <nacitar@ubercpp.com>");
 MODULE_DESCRIPTION("Module to hook into the kernel's input subsystem.");
 MODULE_LICENSE("GPL");
 
+
+#define HANDLER_NAME "universal_input_device"
 
 // Track all deviced by name, id, and physical location (not dev node)
 
@@ -53,57 +57,52 @@ MODULE_LICENSE("GPL");
 // figure out a way to save those bindings
 // ignore axis movement that isn't 50% or more (how do we know extents?)
 // need some sort of external button for programming inputs and pairing.
-struct controller_id {
-  char* name;
-  char* uniq;
-  char* phys;
-  __u16 bustype;
+
+
+// input_value is type code and value
+// input_dev.absinfo
+
+
+#define UGC_MAX_DEVICES 256u
+// 2 chars, [0] = a char id, [1] = null terminator
+// Index 0 is "\0", empty string... but valid still.
+const char ugc_handle_name[UGC_MAX_DEVICES][2] = {
+#define UGC_ID_GEN(offset) \
+  {(char)offset+0}, {(char)offset+1}, {(char)offset+2}, {(char)offset+3}, \
+  {(char)offset+4}, {(char)offset+5}, {(char)offset+6}, {(char)offset+7}, \
+  {(char)offset+8}, {(char)offset+9}, {(char)offset+10}, {(char)offset+11}, \
+  {(char)offset+12}, {(char)offset+13}, {(char)offset+14}, {(char)offset+15}
+  UGC_ID_GEN(0x00), UGC_ID_GEN(0x10), UGC_ID_GEN(0x20), UGC_ID_GEN(0x30),
+  UGC_ID_GEN(0x40), UGC_ID_GEN(0x50), UGC_ID_GEN(0x60), UGC_ID_GEN(0x70),
+  UGC_ID_GEN(0x80), UGC_ID_GEN(0x90), UGC_ID_GEN(0xA0), UGC_ID_GEN(0xB0),
+  UGC_ID_GEN(0xC0), UGC_ID_GEN(0xD0), UGC_ID_GEN(0xE0), UGC_ID_GEN(0xF0)
+#undef UGC_ID_GEN
 };
 
-void controller_id_init(struct controller_id* id) {
-  id->name = NULL;
-  id->uniq = NULL;
-  id->phys = NULL;
-  id->bustype = 0;
-}
+struct ugc_handler_group {
+  unsigned long acquiredbit[BITS_TO_LONGS(UGC_MAX_DEVICES)];
+  unsigned int num_acquired;
+};
 
-struct controller_id* controller_id_new(void) {
-  struct controller_id* id = kmalloc(sizeof(struct controller_id), GFP_KERNEL);
-  controller_id_init(id);
-  return id;
-}
-void controller_id_clear(struct controller_id* id) {
-  kfree(id->name);
-  kfree(id->uniq);
-  kfree(id->phys);
-  controller_id_init(id);
-}
-
-void controller_id_delete(struct controller_id* id) {
-  if (id) {
-    controller_id_clear(id);
-    kfree(id);
+const char* ugc_handle_name_acquire(struct ugc_handler_group* group) {
+  if (group->num_acquired < UGC_MAX_DEVICES) {
+    const int index = find_first_zero_bit(group->acquiredbit, UGC_MAX_DEVICES);
+    set_bit(index, group->acquiredbit);
+    ++group->num_acquired;
+    return ugc_handle_name[index];
   }
+  printk(KERN_DEBUG pr_fmt("Cannot acquire handle; max devices reached.\n"));
+  return NULL;
 }
 
-char* copy_string(const char* source) {
-  char* destination;
-  if (source) {
-    destination = strcpy(kmalloc(strlen(source)+1, GFP_KERNEL), source);
+void ugc_handle_name_release(struct ugc_handler_group* group,
+    const char* name) {
+  if (test_and_clear_bit(*name, group->acquiredbit)) {
+    --group->num_acquired;
   } else {
-    destination = kmalloc(1, GFP_KERNEL);
-    *destination = '\0';
+    printk(KERN_DEBUG pr_fmt("Cannot release %d; it is not acquired.\n"),
+        (int)*name);
   }
-  return destination;
-}
-
-void controller_id_set(struct controller_id* id, const char* name,
-    const char* uniq, const char* phys, __u16 bustype) {
-  controller_id_clear(id);
-  id->name = copy_string(name);
-  id->uniq = copy_string(uniq);
-  id->phys = copy_string(phys);
-  id->bustype = bustype;
 }
 
 static void evbug_event(struct input_handle *handle, unsigned int type, unsigned int code, int value)
@@ -147,7 +146,7 @@ static int evbug_connect(struct input_handler *handler, struct input_dev *dev,
 
   handle->dev = dev;
   handle->handler = handler;
-  handle->name = "evbug";
+  handle->name = "some_device_name";
 
   error = input_register_handle(handle);
   if (error)
@@ -193,7 +192,7 @@ static struct input_handler evbug_handler = {
   .event =	evbug_event,
   .connect =	evbug_connect,
   .disconnect =	evbug_disconnect,
-  .name =		"evbug",
+  .name =		HANDLER_NAME,
   .id_table =	evbug_ids,
 };
 

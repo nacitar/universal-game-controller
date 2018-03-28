@@ -1,5 +1,6 @@
-#ifndef INCLUDED_INFO_STRINGS_H
-#define INCLUDED_INFO_STRINGS_H
+#ifndef INCLUDED_UNIVERSAL_INPUT_INFO_STRINGS_H
+#define INCLUDED_UNIVERSAL_INPUT_INFO_STRINGS_H
+
 #include <linux/input.h>
 inline int is_set_bitmap(unsigned int flag, unsigned long *bm, unsigned int max)
 {
@@ -795,4 +796,5 @@ void get_event_name(unsigned int type, unsigned int code,
     }
   }
 }
-#endif  // INCLUDED_INFO_STRINGS_H
+
+#endif  // INCLUDED_UNIVERSAL_INPUT_INFO_STRINGS_H
