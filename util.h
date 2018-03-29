@@ -19,38 +19,38 @@ char *copy_string(const char *source) {
 
 #include <linux/rbtree.h>
 
-struct pointer_map {
+struct uint_map {
   struct rb_node node;
-  void *key;
-  void *value;
+  unsigned int key;
+  unsigned int value;
 };
 
-struct pointer_map *pointer_map_search(struct rb_root *root, void *key) {
+struct uint_map *uint_map_search(struct rb_root *root, unsigned int key) {
   struct rb_node *it = root->rb_node;
 
   while (it) {
-    struct pointer_map *it_element = container_of(it, struct pointer_map, node);
+    struct uint_map *it_element = container_of(it, struct uint_map, node);
 
-    if ((uintptr_t)key < (uintptr_t)it_element->key) {
+    if (key < it_element->key) {
       it = it->rb_left;
-    } else if ((uintptr_t)key > (uintptr_t)it_element->key) {
+    } else if (key > it_element->key) {
       it = it->rb_right;
     }
     return it_element;
   }
   return NULL;
 }
-bool pointer_map_insert(struct rb_root *root, struct pointer_map *element) {
+bool uint_map_insert(struct rb_root *root, struct uint_map *element) {
   struct rb_node **it_ptr = &(root->rb_node), *parent = NULL;
 
   /* Figure out where to put new node */
   while (*it_ptr) {
-    struct pointer_map *it_element = container_of(*it_ptr, struct pointer_map, node);
+    struct uint_map *it_element = container_of(*it_ptr, struct uint_map, node);
 
     parent = *it_ptr;
-    if ((uintptr_t)element->key < (uintptr_t)it_element->key) {
+    if (element->key < it_element->key) {
       it_ptr = &((*it_ptr)->rb_left);
-    } else if ((uintptr_t)element->key > (uintptr_t)it_element->key) {
+    } else if (element->key > it_element->key) {
       it_ptr = &((*it_ptr)->rb_right);
     } else {
       return false;
@@ -64,14 +64,11 @@ bool pointer_map_insert(struct rb_root *root, struct pointer_map *element) {
   return true;
 }
 
-typedef void (*pointer_map_free)(struct pointer_map *);
+typedef void (*uint_map_free)(struct uint_map *);
 
-void pointer_map_erase(struct rb_root *root, struct pointer_map *element,
-    pointer_map_free free_func) {
-  if (element) {
-    rb_erase(&element->node, root);
-    free_func(element);
-  }
+// caller required to free element if necessary
+void uint_map_erase(struct rb_root *root, struct uint_map *element) {
+  rb_erase(&element->node, root);
 }
 
 #if 0

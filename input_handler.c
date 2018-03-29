@@ -63,7 +63,28 @@ MODULE_LICENSE("GPL");
 // input_dev.absinfo
 
 
+// break axes into positive and negative directions
 #define UGC_MAX_DEVICES 256u
+#define UGC_CONFIGURE_REPEAT_COUNT 10u
+#define UGC_MAX_INPUTS 50
+
+struct ugc_input {
+  unsigned int type;
+  unsigned int code;
+};
+
+enum ugc_config_state {
+  CONNECTED, CONFIGURING, READY
+};
+// start with final button to configure; store that as terminal
+struct ugc_device {
+  enum ugc_config_state config_state;
+  unsigned int repeat_count;
+  struct ugc_input last_input;
+  struct rb_root input_code_to_index;  // = RB_ROOT;
+  __u32 input_state[UGC_MAX_INPUTS];
+};
+
 // 2 chars, [0] = a char id, [1] = null terminator
 // Index 0 is "\0", empty string... but valid still.
 const char ugc_handle_name[UGC_MAX_DEVICES][2] = {
@@ -79,12 +100,12 @@ const char ugc_handle_name[UGC_MAX_DEVICES][2] = {
 #undef UGC_ID_GEN
 };
 
-struct ugc_handler_group {
+struct ugc_handle_group {
   unsigned long acquiredbit[BITS_TO_LONGS(UGC_MAX_DEVICES)];
   unsigned int num_acquired;
 };
 
-const char* ugc_handle_name_acquire(struct ugc_handler_group* group) {
+const char* ugc_handle_name_acquire(struct ugc_handle_group* group) {
   if (group->num_acquired < UGC_MAX_DEVICES) {
     const int index = find_first_zero_bit(group->acquiredbit, UGC_MAX_DEVICES);
     set_bit(index, group->acquiredbit);
@@ -95,7 +116,7 @@ const char* ugc_handle_name_acquire(struct ugc_handler_group* group) {
   return NULL;
 }
 
-void ugc_handle_name_release(struct ugc_handler_group* group,
+void ugc_handle_name_release(struct ugc_handle_group* group,
     const char* name) {
   if (test_and_clear_bit(*name, group->acquiredbit)) {
     --group->num_acquired;
@@ -104,6 +125,10 @@ void ugc_handle_name_release(struct ugc_handler_group* group,
         (int)*name);
   }
 }
+
+struct ugc_handle_group g_handle_group = {0};
+struct ugc_device g_devices[UGC_MAX_DEVICES];  // TODO: cleared/initialized along with handle id acquisition
+unsigned int g_device_count = 0;
 
 static void evbug_event(struct input_handle *handle, unsigned int type, unsigned int code, int value)
 {
@@ -146,7 +171,7 @@ static int evbug_connect(struct input_handler *handler, struct input_dev *dev,
 
   handle->dev = dev;
   handle->handler = handler;
-  handle->name = "some_device_name";
+  handle->name = ugc_handle_name_acquire(&g_handle_group);
 
   error = input_register_handle(handle);
   if (error)
@@ -173,6 +198,7 @@ err_free_handle:
 
 static void evbug_disconnect(struct input_handle *handle)
 {
+  ugc_handle_name_release(&g_handle_group, handle->name);
   printk(KERN_DEBUG pr_fmt("Disconnected device: %s\n"),
       dev_name(&handle->dev->dev));
 
