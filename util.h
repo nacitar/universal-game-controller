@@ -35,8 +35,9 @@ struct uint_map *uint_map_search(struct rb_root *root, unsigned int key) {
       it = it->rb_left;
     } else if (key > it_element->key) {
       it = it->rb_right;
+    } else {
+      return it_element;
     }
-    return it_element;
   }
   return NULL;
 }
@@ -71,11 +72,11 @@ void uint_map_erase(struct rb_root *root, struct uint_map *element) {
   rb_erase(&element->node, root);
 }
 
-#if 0
-void my_iterate(struct rb_root *mytree) {
+void uint_map_iterate(struct rb_root *root) {
   struct rb_node *node;
-  for (node = rb_first(mytree); node; node = rb_next(node))
-    printk("key=%s\n", rb_entry(node, struct mytype, node)->keystring);
+  for (node = rb_first(root); node; node = rb_next(node)) {
+    printk(KERN_DEBUG pr_fmt("key=%u\n"), rb_entry(node, struct uint_map, node)->key);
+  }
 }
 
 // To replace an existing node in a tree with a new one with the same key, call:
@@ -86,6 +87,5 @@ void my_iterate(struct rb_root *mytree) {
 // Replacing a node this way does not re-sort the tree: If the new node doesn't
 // have the same key as the old node, the rbtree will probably become corrupted.
 
-#endif
 
 #endif  // INCLUDED_UNIVERSAL_INPUT_UTIL_H
