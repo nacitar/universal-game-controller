@@ -234,11 +234,12 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
             device->count = 1;
           }
         } else if (device->config_state == CONFIGURING) { 
-          struct ugc_input *node;
           const bool is_terminal = (
               ugc_input_compare(&device->last_input, &this_input) == 0);
-          if (device->count == 0 && is_terminal) {
-            // first input can't be terminal
+          struct ugc_input *node = ugc_input_search(
+              &device->input_code_to_index, &this_input);
+          if (node || (device->count == 0 && is_terminal)) {
+            // no double bindings, and first input can't be terminal
             return;
           }
           node = device->input_nodes + device->count;
@@ -251,7 +252,6 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
             printk(KERN_DEBUG pr_fmt("FAIL\n"));
           }
           ++device->count;
-          // TODO: need to forbid repeat bindings
           if (is_terminal) {
             device->config_state = READY;
           }
