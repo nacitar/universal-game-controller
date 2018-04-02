@@ -1,8 +1,19 @@
 #ifndef INCLUDED_UNIVERSAL_INPUT_CONTROLLER_ID_H
 #define INCLUDED_UNIVERSAL_INPUT_CONTROLLER_ID_H
 
-#include "util.h"
+#include <linux/string.h>  // strcpy
+#include <linux/slab.h>  // kmalloc, GFP_KERNEL, ...
 
+char *copy_string(const char *source) {
+  char *destination;
+  if (source) {
+    destination = strcpy(kmalloc(strlen(source)+1, GFP_KERNEL), source);
+  } else {
+    destination = kmalloc(1, GFP_KERNEL);
+    *destination = '\0';
+  }
+  return destination;
+}
 struct controller_id {
   char* name;
   char* uniq;
