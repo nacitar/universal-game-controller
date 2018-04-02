@@ -44,8 +44,8 @@ MODULE_LICENSE("GPL");
 #define UGC_NAME_TO_INDEX(name) (+(unsigned char)*(name))
 
 // axis < 0 and > 0 distinct inputs
-//const __u32 g_UGC_MAX_VALUE = ~(__u32)0;
-//const __u32 g_UGC_MIN_PRESSED_VALUE = g_UGC_MAX_VALUE / 2;
+const __u32 g_UGC_MAX_VALUE = U32_MAX;
+const __u32 g_UGC_MIN_PRESSED_VALUE = U32_MAX / 2;
 
 enum ugc_config_state {
   CONNECTED=0, CONFIGURING, READY
@@ -202,25 +202,28 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
   device = g_devices + UGC_NAME_TO_INDEX(handle->name);
 
 
-  switch (type) {
-    case EV_REL: {
-      struct input_absinfo* absinfo = device->dev->absinfo + code;
-      // TODO fuzz and flat?
-    }
-    case EV_KEY:
-      break;
-  }
-
-
-  if (type == EV_KEY) {
+  if (type == EV_REL || type == EV_KEY) {
     struct ugc_input this_input = {
       .type = type,
       .code = code,
-      .positive = true,  // for EV_KEY
+      .positive = true  // for EV_KEY
     };
-    if (value != 0) {  // pressed
-      switch (device->config_state) {
-        case CONNECTED: {
+    if (type == EV_REL) {
+        struct input_absinfo* absinfo = device->dev->absinfo + code;
+        if (value < 0) {
+          this_input.positive = false;
+          this_input.value = normalize_value(0 - value, 0, -absinfo->minimum);
+        } else {
+          this_input.value = normalize_value(value, 0, absinfo->maximum);
+        }
+    } else {
+      this_input.value = normalize_value(value, 0, 1);
+    }
+
+    if (type == EV_KEY) {
+      if (device->config_state != READY &&
+          this_input.value >= g_UGC_MIN_PRESSED_VALUE) {
+        if (device->config_state == CONNECTED) {
           if (ugc_input_compare(&device->last_input, &this_input) == 0) {
             if (++device->count == 10) {
               device->config_state = CONFIGURING;
@@ -230,15 +233,13 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
             device->last_input = this_input;
             device->count = 1;
           }
-          break;
-        }
-        case CONFIGURING: {
+        } else if (device->config_state == CONFIGURING) { 
           struct ugc_input *node;
-          const bool is_terminal = (ugc_input_compare(
-              &device->last_input, &this_input) == 0);
+          const bool is_terminal = (
+              ugc_input_compare(&device->last_input, &this_input) == 0);
           if (device->count == 0 && is_terminal) {
             // first input can't be terminal
-            break;
+            return;
           }
           node = device->input_nodes + device->count;
           *node = this_input;
@@ -254,17 +255,14 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
           if (is_terminal) {
             device->config_state = READY;
           }
-          break;
         }
-        case READY: {
-          struct ugc_input *node;
-          node = ugc_input_search(&device->input_code_to_index, &this_input);
-          if (node) {
-            device->input_state[node->value] = value;
-            printk(KERN_DEBUG pr_fmt("Button: %u, Value: %u\n"),
-                node->value, value);
-          }
-          break;
+      } else if (device->config_state == READY) {
+        struct ugc_input *node;
+        node = ugc_input_search(&device->input_code_to_index, &this_input);
+        if (node) {
+          device->input_state[node->value] = this_input.value;
+          printk(KERN_DEBUG pr_fmt("Button: %u, Value: %u\n"),
+              node->value, this_input.value);
         }
       }
     }

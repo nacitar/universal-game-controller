@@ -13,7 +13,7 @@ struct ugc_input {
   unsigned int code;
   bool positive;
   // value not part of comparison
-  unsigned int value;
+  __u32 value;
 };
 int ugc_input_compare(const struct ugc_input *lhs,
     const struct ugc_input *rhs) {
