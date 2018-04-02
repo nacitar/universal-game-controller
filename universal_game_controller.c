@@ -104,7 +104,7 @@ void ugc_device_name_release(struct ugc_device_group* group,
 }
 
 // scales the value into the range of a __u32
-__u32 normalize_value(int value, __s32 minimum, __s32 maximum) {
+__u32 normalize_value(__u32 value, __s32 minimum, __s32 maximum) {
   return (__u32)((__u64)((__s64)value - minimum) * (((__u64)1 << 32) - 1) /
       (__u64)((__s64)maximum - minimum));
 }
@@ -211,6 +211,7 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
     if (type == EV_REL) {
         struct input_absinfo* absinfo = device->dev->absinfo + code;
         if (value < 0) {
+          // TODO check absolute negative to ensure output is positive
           this_input.positive = false;
           this_input.value = normalize_value(0 - value, 0, -absinfo->minimum);
         } else {
