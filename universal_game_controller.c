@@ -220,50 +220,48 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
       this_input.value = normalize_value(value, 0, 1);
     }
 
-    if (type == EV_KEY) {
-      if (device->config_state != READY &&
-          this_input.value >= g_UGC_MIN_PRESSED_VALUE) {
-        if (device->config_state == CONNECTED) {
-          if (ugc_input_compare(&device->last_input, &this_input) == 0) {
-            if (++device->count == 10) {
-              device->config_state = CONFIGURING;
-              device->count = 0;
-            }
-          } else {
-            device->last_input = this_input;
-            device->count = 1;
+    if (device->config_state != READY &&
+        this_input.value >= g_UGC_MIN_PRESSED_VALUE) {
+      if (device->config_state == CONNECTED) {
+        if (ugc_input_compare(&device->last_input, &this_input) == 0) {
+          if (++device->count == 10) {
+            device->config_state = CONFIGURING;
+            device->count = 0;
           }
-        } else if (device->config_state == CONFIGURING) { 
-          const bool is_terminal = (
-              ugc_input_compare(&device->last_input, &this_input) == 0);
-          struct ugc_input *node = ugc_input_search(
-              &device->input_code_to_index, &this_input);
-          if (node || (device->count == 0 && is_terminal)) {
-            // no double bindings, and first input can't be terminal
-            return;
-          }
-          node = device->input_nodes + device->count;
-          *node = this_input;
-          node->value = device->count;
-          // TODO output more
-          printk(KERN_DEBUG pr_fmt("Adding button: %u, Code %u\n"),
-              node->value, node->code);
-          if (!ugc_input_insert(&device->input_code_to_index, node)) {
-            printk(KERN_DEBUG pr_fmt("FAIL\n"));
-          }
-          ++device->count;
-          if (is_terminal) {
-            device->config_state = READY;
-          }
+        } else {
+          device->last_input = this_input;
+          device->count = 1;
         }
-      } else if (device->config_state == READY) {
-        struct ugc_input *node;
-        node = ugc_input_search(&device->input_code_to_index, &this_input);
-        if (node) {
-          device->input_state[node->value] = this_input.value;
-          printk(KERN_DEBUG pr_fmt("Button: %u, Value: %u\n"),
-              node->value, this_input.value);
+      } else if (device->config_state == CONFIGURING) { 
+        const bool is_terminal = (
+            ugc_input_compare(&device->last_input, &this_input) == 0);
+        struct ugc_input *node = ugc_input_search(
+            &device->input_code_to_index, &this_input);
+        if (node || (device->count == 0 && is_terminal)) {
+          // no double bindings, and first input can't be terminal
+          return;
         }
+        node = device->input_nodes + device->count;
+        *node = this_input;
+        node->value = device->count;
+        // TODO output more
+        printk(KERN_DEBUG pr_fmt("Adding button: %u, Code %u\n"),
+            node->value, node->code);
+        if (!ugc_input_insert(&device->input_code_to_index, node)) {
+          printk(KERN_DEBUG pr_fmt("FAIL\n"));
+        }
+        ++device->count;
+        if (is_terminal) {
+          device->config_state = READY;
+        }
+      }
+    } else if (device->config_state == READY) {
+      struct ugc_input *node;
+      node = ugc_input_search(&device->input_code_to_index, &this_input);
+      if (node) {
+        device->input_state[node->value] = this_input.value;
+        printk(KERN_DEBUG pr_fmt("Button: %u, Value: %u\n"),
+            node->value, this_input.value);
       }
     }
   }
