@@ -1,1 +1,1 @@
-# universal-input-device
+# universal-game-controller
