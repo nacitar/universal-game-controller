@@ -1,5 +1,5 @@
 
-obj-m += input_handler.o
+obj-m += universal_game_controller.o
 
 all:
 	$(MAKE) -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules
