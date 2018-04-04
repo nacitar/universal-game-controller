@@ -10,6 +10,9 @@
 #include "controller_id.h"
 #include "ugc_input.h"
 
+#include <linux/interrupt.h>
+#include <linux/gpio.h>
+
 MODULE_AUTHOR("Jacob McIntosh <nacitar@ubercpp.com>");
 MODULE_DESCRIPTION("Allows usage of arbitrary input devices on "
     "retro game consoles.");
@@ -17,6 +20,71 @@ MODULE_LICENSE("GPL");
 
 
 #define HANDLER_NAME "universal_game_controller"
+
+
+
+#define GPIO_INTERRUPT_LABEL "ugc_test_interrupt"
+#define GPIO_DEVICE_LABEL "ugc_device"
+#define GPIO_INTERRUPT_PIN 17
+
+short int irq_any_gpio = 0;
+static irqreturn_t r_irq_handler(int irq, void *dev_id, struct pt_regs *regs) {
+ 
+   unsigned long flags;
+   
+   // disable hard interrupts (remember them in flag 'flags')
+   local_irq_save(flags);
+ 
+   // NOTE:
+   // Anonymous Sep 17, 2013, 3:16:00 PM:
+   // You are putting printk while interupt are disabled. printk can block.
+   // It's not a good practice.
+   // 
+   // hardware.coder:
+   // http://stackoverflow.com/questions/8738951/printk-inside-an-interrupt-handler-is-it-really-that-bad
+ 
+   printk(KERN_NOTICE "Interrupt [%d] for device %s was triggered !.\n",
+          irq, (char *) dev_id);
+ 
+   // restore hard interrupts
+   local_irq_restore(flags);
+ 
+   return IRQ_HANDLED;
+}
+
+void r_int_config(void) {
+
+   if (gpio_request(GPIO_INTERRUPT_PIN, GPIO_INTERRUPT_LABEL)) {
+      printk("GPIO request faiure: %s\n", GPIO_INTERRUPT_LABEL);
+      return;
+   }
+
+   if ( (irq_any_gpio = gpio_to_irq(GPIO_INTERRUPT_PIN)) < 0 ) {
+      printk("GPIO to IRQ mapping faiure %s\n", GPIO_INTERRUPT_LABEL);
+      return;
+   }
+
+   printk(KERN_NOTICE "Mapped int %d\n", irq_any_gpio);
+
+   if (request_irq(irq_any_gpio,
+                   (irq_handler_t ) r_irq_handler,
+                   IRQF_TRIGGER_FALLING,
+                   GPIO_INTERRUPT_LABEL,
+                   GPIO_DEVICE_LABEL)) {
+      printk("Irq Request failure\n");
+      return;
+   }
+
+   return;
+}
+
+void r_int_release(void) {
+
+   free_irq(irq_any_gpio, GPIO_DEVICE_LABEL);
+   gpio_free(GPIO_INTERRUPT_PIN);
+
+   return;
+}
 
 // Track all deviced by name, id, and physical location (not dev node)
 
@@ -233,7 +301,7 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
           device->last_input = this_input;
           device->count = 1;
         }
-      } else if (device->config_state == CONFIGURING) { 
+      } else if (device->config_state == CONFIGURING) {
         const bool is_terminal = (
             ugc_input_compare(&device->last_input, &this_input) == 0);
         struct ugc_input *node = ugc_input_search(
@@ -284,11 +352,13 @@ static struct input_handler ugc_handler = {
 
 static int __init ugc_init(void)
 {
+  r_int_config();
   return input_register_handler(&ugc_handler);
 }
 
 static void __exit ugc_exit(void)
 {
+  r_int_release();
   input_unregister_handler(&ugc_handler);
 }
 
