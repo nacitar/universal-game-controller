@@ -1,14 +1,15 @@
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
-#include "info_strings.h"
 #include <linux/slab.h>
 #include <linux/module.h>
 #include <linux/input.h>
 #include <linux/init.h>
 #include <linux/device.h>
 
-#include "controller_id.h"
-#include "ugc_input.h"
+#include <ugc/controller_id.h>
+#include <ugc/info_strings.h>
+#include <ugc/input_state.h>
+#include <ugc/pin_config.h>
 
 #include <linux/interrupt.h>
 #include <linux/gpio.h>
@@ -22,69 +23,54 @@ MODULE_LICENSE("GPL");
 #define HANDLER_NAME "universal_game_controller"
 
 
+// https://lwn.net/Articles/443043/
 
-#define GPIO_INTERRUPT_LABEL "ugc_test_interrupt"
-#define GPIO_DEVICE_LABEL "ugc_device"
-#define GPIO_INTERRUPT_PIN 17
 
-short int irq_any_gpio = 0;
-static irqreturn_t r_irq_handler(int irq, void *dev_id, struct pt_regs *regs) {
- 
+static irqreturn_t SnesClockRisingInterrupt(int irq, void *dev_id) {
    unsigned long flags;
-   
    // disable hard interrupts (remember them in flag 'flags')
    local_irq_save(flags);
- 
-   // NOTE:
-   // Anonymous Sep 17, 2013, 3:16:00 PM:
-   // You are putting printk while interupt are disabled. printk can block.
-   // It's not a good practice.
-   // 
-   // hardware.coder:
-   // http://stackoverflow.com/questions/8738951/printk-inside-an-interrupt-handler-is-it-really-that-bad
- 
-   printk(KERN_NOTICE "Interrupt [%d] for device %s was triggered !.\n",
-          irq, (char *) dev_id);
- 
+
+   //printk(KERN_NOTICE "Interrupt [%d] for device %s was triggered !.\n",
+   //       irq, (char *) dev_id);
+
    // restore hard interrupts
    local_irq_restore(flags);
- 
+   return IRQ_HANDLED;
+}
+static irqreturn_t SnesLatchFallingInterrupt(int irq, void *dev_id) {
+   unsigned long flags;
+   // disable hard interrupts (remember them in flag 'flags')
+   local_irq_save(flags);
+
+   //printk(KERN_NOTICE "Interrupt [%d] for device %s was triggered !.\n",
+   //       irq, (char *) dev_id);
+
+   // restore hard interrupts
+   local_irq_restore(flags);
    return IRQ_HANDLED;
 }
 
-void r_int_config(void) {
-
-   if (gpio_request(GPIO_INTERRUPT_PIN, GPIO_INTERRUPT_LABEL)) {
-      printk("GPIO request faiure: %s\n", GPIO_INTERRUPT_LABEL);
-      return;
-   }
-
-   if ( (irq_any_gpio = gpio_to_irq(GPIO_INTERRUPT_PIN)) < 0 ) {
-      printk("GPIO to IRQ mapping faiure %s\n", GPIO_INTERRUPT_LABEL);
-      return;
-   }
-
-   printk(KERN_NOTICE "Mapped int %d\n", irq_any_gpio);
-
-   if (request_irq(irq_any_gpio,
-                   (irq_handler_t ) r_irq_handler,
-                   IRQF_TRIGGER_FALLING,
-                   GPIO_INTERRUPT_LABEL,
-                   GPIO_DEVICE_LABEL)) {
-      printk("Irq Request failure\n");
-      return;
-   }
-
-   return;
-}
-
-void r_int_release(void) {
-
-   free_irq(irq_any_gpio, GPIO_DEVICE_LABEL);
-   gpio_free(GPIO_INTERRUPT_PIN);
-
-   return;
-}
+static struct PinConfig g_snes_data = {
+  .label = "snes_data",
+  .pin_number = 11,  // BCM 17
+  .direction = kOutput,
+  .output_value = kLow,
+};
+static struct PinConfig g_snes_clock = {
+  .label = "snes_clock",
+  .pin_number = 13,  // BCM 27
+  .direction = kInput,
+  .input_irq_flags = IRQF_TRIGGER_RISING,
+  .input_irq_handler = SnesClockRisingInterrupt,
+};
+static struct PinConfig g_snes_latch = {
+  .label = "snes_latch",
+  .pin_number = 15,  // BCM 22
+  .direction = kInput,
+  .input_irq_flags = IRQF_TRIGGER_FALLING,  // rising too? to store inputs
+  .input_irq_handler = SnesLatchFallingInterrupt,
+};
 
 // Track all deviced by name, id, and physical location (not dev node)
 
@@ -115,29 +101,29 @@ void r_int_release(void) {
 const __u32 g_UGC_MAX_VALUE = U32_MAX;
 const __u32 g_UGC_MIN_PRESSED_VALUE = U32_MAX / 2;
 
-enum ugc_config_state {
-  CONNECTED=0, CONFIGURING, READY
+enum ConfigState {
+  kConnected=0, kConfiguring, kReady
 };
 
 // start with final button to configure; store that as terminal
-struct ugc_device {
+struct Device {
   struct input_dev *dev;  // name, uniq, phys, id.bustype
-  enum ugc_config_state config_state;
-  unsigned int count;  // repeat count in CONFIGURING state, button count in READY state
-  struct ugc_input last_input;
-  struct ugc_input input_nodes[UGC_MAX_INPUTS];  // storage for nodes of the tree
+  enum ConfigState config_state;
+  unsigned int count;  // repeat count in kConfiguring state, button count in kReady state
+  struct InputState last_input;
+  struct InputState input_nodes[UGC_MAX_INPUTS];  // storage for nodes of the tree
   struct rb_root input_code_to_index;  // = RB_ROOT; but that just zeroes...
   __u32 input_state[UGC_MAX_INPUTS];
 };
 
-struct ugc_device_group {
+struct DeviceGroup {
   unsigned long acquiredbit[BITS_TO_LONGS(UGC_MAX_DEVICES)];
   unsigned int num_acquired;
 };
 
 // 2 chars, [0] = a char id, [1] = null terminator
 // Index 0 is "\0", empty string... but valid still.
-const char ugc_device_name[UGC_MAX_DEVICES][2] = {
+const char kDeviceName[UGC_MAX_DEVICES][2] = {
 #define UGC_NAME_PT(offset) \
   {(char)offset+0}, {(char)offset+1}, {(char)offset+2}, {(char)offset+3}, \
   {(char)offset+4}, {(char)offset+5}, {(char)offset+6}, {(char)offset+7}, \
@@ -150,18 +136,18 @@ const char ugc_device_name[UGC_MAX_DEVICES][2] = {
 #undef UGC_NAME_PT
 };
 
-const char* ugc_device_name_acquire(struct ugc_device_group* group) {
+const char* DeviceNameAcquire(struct DeviceGroup* group) {
   if (group->num_acquired < UGC_MAX_DEVICES) {
     const int index = find_first_zero_bit(group->acquiredbit, UGC_MAX_DEVICES);
     set_bit(index, group->acquiredbit);
     ++group->num_acquired;
-    return ugc_device_name[index];
+    return kDeviceName[index];
   }
   printk(KERN_DEBUG pr_fmt("Cannot acquire name; max devices reached.\n"));
   return NULL;
 }
 
-void ugc_device_name_release(struct ugc_device_group* group,
+void DeviceNameRelease(struct DeviceGroup* group,
     const char* name) {
   if (test_and_clear_bit(UGC_NAME_TO_INDEX(name), group->acquiredbit)) {
     --group->num_acquired;
@@ -172,16 +158,16 @@ void ugc_device_name_release(struct ugc_device_group* group,
 }
 
 // scales the value into the range of a __u32
-__u32 normalize_value(__u32 value, __s32 minimum, __s32 maximum) {
+__u32 NormalizeValue(__u32 value, __s32 minimum, __s32 maximum) {
   return (__u32)((__u64)((__s64)value - minimum) * (((__u64)1 << 32) - 1) /
       (__u64)((__s64)maximum - minimum));
 }
 
-struct ugc_device_group g_device_group = {0};
-struct ugc_device g_devices[UGC_MAX_DEVICES];
+static struct DeviceGroup g_device_group = {0};
+static struct Device g_devices[UGC_MAX_DEVICES];
 
 
-static int ugc_connect_device(struct input_handler *handler, struct input_dev *dev,
+static int ConnectDevice(struct input_handler *handler, struct input_dev *dev,
     const struct input_device_id *id)
 {
   struct input_handle *handle;
@@ -193,7 +179,7 @@ static int ugc_connect_device(struct input_handler *handler, struct input_dev *d
     return -ENOMEM;
   }
 
-  device_name = ugc_device_name_acquire(&g_device_group);
+  device_name = DeviceNameAcquire(&g_device_group);
   if (!device_name) {
     printk(KERN_DEBUG pr_fmt("Device connected, but no names available.\n"));
     return 0;
@@ -210,12 +196,12 @@ static int ugc_connect_device(struct input_handler *handler, struct input_dev *d
   if (error)
     goto err_unregister_handle;
 
-  g_devices[UGC_NAME_TO_INDEX(device_name)] = (struct ugc_device) {
+  g_devices[UGC_NAME_TO_INDEX(device_name)] = (struct Device) {
     .dev = dev,
     .input_code_to_index = RB_ROOT
   };
 
-  get_bus_name(dev->id.bustype, &bus_name);
+  GetBusName(dev->id.bustype, &bus_name);
 
   printk(KERN_DEBUG pr_fmt("Connected device: [%s] %s (%s) at %s\n"),
       bus_name,
@@ -232,14 +218,14 @@ err_free_handle:
   return error;
 }
 
-static void ugc_disconnect_device(struct input_handle *handle)
+static void DisconnectDevice(struct input_handle *handle)
 {
   const char* bus_name;
-  get_bus_name(handle->dev->id.bustype, &bus_name);
+  GetBusName(handle->dev->id.bustype, &bus_name);
 
   // no need to cleanup the device itself; all storage is static and
   // it is cleared when reused
-  ugc_device_name_release(&g_device_group, handle->name);
+  DeviceNameRelease(&g_device_group, handle->name);
 
   printk(KERN_DEBUG pr_fmt("Disconnected device: [%s] %s (%s) at %s\n"),
       bus_name,
@@ -252,12 +238,12 @@ static void ugc_disconnect_device(struct input_handle *handle)
   kfree(handle);
 }
 
-static void ugc_event(struct input_handle *handle, unsigned int type, unsigned int code, int value)
+static void EventHandler(struct input_handle *handle, unsigned int type, unsigned int code, int value)
 {
   const char *event_name, *code_name, *bus_name;
-  struct ugc_device *device;
-  get_event_name(type, code, &event_name, &code_name);
-  get_bus_name(handle->dev->id.bustype, &bus_name);
+  struct Device *device;
+  GetEventName(type, code, &event_name, &code_name);
+  GetBusName(handle->dev->id.bustype, &bus_name);
   if (!event_name) {
     event_name = "UNKNOWN";
   }
@@ -271,7 +257,7 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
 
 
   if (type == EV_REL || type == EV_KEY) {
-    struct ugc_input this_input = {
+    struct InputState this_input = {
       .type = type,
       .code = code,
       .positive = true  // for EV_KEY
@@ -281,30 +267,30 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
         if (value < 0) {
           // TODO check absolute negative to ensure output is positive
           this_input.positive = false;
-          this_input.value = normalize_value(0 - value, 0, -absinfo->minimum);
+          this_input.value = NormalizeValue(0 - value, 0, -absinfo->minimum);
         } else {
-          this_input.value = normalize_value(value, 0, absinfo->maximum);
+          this_input.value = NormalizeValue(value, 0, absinfo->maximum);
         }
     } else {
-      this_input.value = normalize_value(value, 0, 1);
+      this_input.value = NormalizeValue(value, 0, 1);
     }
 
-    if (device->config_state != READY &&
+    if (device->config_state != kReady &&
         this_input.value >= g_UGC_MIN_PRESSED_VALUE) {
-      if (device->config_state == CONNECTED) {
-        if (ugc_input_compare(&device->last_input, &this_input) == 0) {
+      if (device->config_state == kConnected) {
+        if (InputState_Compare(&device->last_input, &this_input) == 0) {
           if (++device->count == 10) {
-            device->config_state = CONFIGURING;
+            device->config_state = kConfiguring;
             device->count = 0;
           }
         } else {
           device->last_input = this_input;
           device->count = 1;
         }
-      } else if (device->config_state == CONFIGURING) {
+      } else if (device->config_state == kConfiguring) {
         const bool is_terminal = (
-            ugc_input_compare(&device->last_input, &this_input) == 0);
-        struct ugc_input *node = ugc_input_search(
+            InputState_Compare(&device->last_input, &this_input) == 0);
+        struct InputState *node = InputState_Search(
             &device->input_code_to_index, &this_input);
         if (node || (device->count == 0 && is_terminal)) {
           // no double bindings, and first input can't be terminal
@@ -316,17 +302,17 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
         // TODO output more
         printk(KERN_DEBUG pr_fmt("Adding button: %u, Code %u\n"),
             node->value, node->code);
-        if (!ugc_input_insert(&device->input_code_to_index, node)) {
+        if (!InputState_Insert(&device->input_code_to_index, node)) {
           printk(KERN_DEBUG pr_fmt("FAIL\n"));
         }
         ++device->count;
         if (is_terminal) {
-          device->config_state = READY;
+          device->config_state = kReady;
         }
       }
-    } else if (device->config_state == READY) {
-      struct ugc_input *node;
-      node = ugc_input_search(&device->input_code_to_index, &this_input);
+    } else if (device->config_state == kReady) {
+      struct InputState *node;
+      node = InputState_Search(&device->input_code_to_index, &this_input);
       if (node) {
         device->input_state[node->value] = this_input.value;
         printk(KERN_DEBUG pr_fmt("Button: %u, Value: %u\n"),
@@ -335,32 +321,39 @@ static void ugc_event(struct input_handle *handle, unsigned int type, unsigned i
     }
   }
 }
-static const struct input_device_id ugc_id_match_table[] = {
+static const struct input_device_id g_id_match_table[] = {
   { .driver_info = 1 },	/* Matches all devices */
   { },			/* Terminating zero entry */
 };
 
-MODULE_DEVICE_TABLE(input, ugc_id_match_table);
+MODULE_DEVICE_TABLE(input, g_id_match_table);
 
-static struct input_handler ugc_handler = {
-  .event =	ugc_event,
-  .connect =	ugc_connect_device,
-  .disconnect =	ugc_disconnect_device,
+static struct input_handler g_InputHandler = {
+  .event =	EventHandler,
+  .connect =	ConnectDevice,
+  .disconnect =	DisconnectDevice,
   .name =		HANDLER_NAME,
-  .id_table =	ugc_id_match_table,
+  .id_table =	g_id_match_table,
 };
 
-static int __init ugc_init(void)
+static int __init Init(void)
 {
-  r_int_config();
-  return input_register_handler(&ugc_handler);
+  if (
+      PinConfig_Setup(&g_snes_data) &&
+      PinConfig_Setup(&g_snes_clock) &&
+      PinConfig_Setup(&g_snes_latch)) {
+    return input_register_handler(&g_InputHandler);
+  }
+  return -1;
 }
 
-static void __exit ugc_exit(void)
+static void __exit Exit(void)
 {
-  r_int_release();
-  input_unregister_handler(&ugc_handler);
+  input_unregister_handler(&g_InputHandler);
+  PinConfig_Release(&g_snes_data);
+  PinConfig_Release(&g_snes_clock);
+  PinConfig_Release(&g_snes_latch);
 }
 
-module_init(ugc_init);
-module_exit(ugc_exit);
+module_init(Init);
+module_exit(Exit);

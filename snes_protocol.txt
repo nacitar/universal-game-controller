@@ -1,0 +1,41 @@
+int interrupt_enable (void)
+{
+  return wiringPiISR (PIN_LIN, INT_EDGE_FALLING, &latch_interrupt);
+}
+
+Can detect snes power via vcc on controller
+
+Buttons shift on rising edge of clock
+CPU reads on falling edge of clock
+Logic high on data means NOT pressed
+SNES controllers drive first button on falling edge of the latch
+After 16 cycle sequence, data line is driven low
+
+        Clock Cycle     Button Reported
+        ===========     ===============
+        1               B
+        2               Y
+        3               Select
+        4               Start
+        5               Up on joypad
+        6               Down on joypad
+        7               Left on joypad
+        8               Right on joypad
+        9               A
+        10              X
+        11              L
+        12              R
+        13              none (always high/released)
+        14              none (always high/released)
+        15              none (always high/released)
+        16              none (always high/released)
+
+On latch rising
+- Set inputs to a buffer
+- Reset button index
+
+On latch falling (initial button), or clock rising
+- Set button for current index
+- increment index
+- 12-15th rising edges (button 13 to 16), set high/released
+- 16th rising edge (aka, end of clock cycles), set to LOW

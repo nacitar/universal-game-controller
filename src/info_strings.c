@@ -1,15 +1,12 @@
-#ifndef INCLUDED_UNIVERSAL_INPUT_INFO_STRINGS_H
-#define INCLUDED_UNIVERSAL_INPUT_INFO_STRINGS_H
+#include <ugc/info_strings.h>
 
-#include <linux/input.h>
-inline int is_set_bitmap(unsigned int flag, unsigned long *bm, unsigned int max)
-{
+int IsBitmapSet(unsigned int flag, unsigned long *bm, unsigned int max) {
   return flag <= max && test_bit(flag, bm);
 }
-//is_set_bitmap(code, dev->keybit, KEY_MAX)
+//IsBitmapSet(code, dev->keybit, KEY_MAX)
 // Applies to propbit values too.
 
-void get_bus_name(__u16 bustype, const char** bus_name) {
+void GetBusName(__u16 bustype, const char** bus_name) {
   *bus_name = NULL;
   switch (bustype) {
     case BUS_PCI: *bus_name = "BUS_PCI"; break;
@@ -36,7 +33,7 @@ void get_bus_name(__u16 bustype, const char** bus_name) {
     case BUS_INTEL_ISHTP: *bus_name = "BUS_INTEL_ISHTP"; break;
   }
 }
-void get_key_name(unsigned int code, const char** code_name) {
+void GetKeyName(unsigned int code, const char** code_name) {
   *code_name = NULL;
   switch (code) {
     case KEY_RESERVED: *code_name = "KEY_RESERVED"; break;
@@ -605,7 +602,7 @@ void get_key_name(unsigned int code, const char** code_name) {
     case BTN_TRIGGER_HAPPY40: *code_name = "BTN_TRIGGER_HAPPY40"; break;
   }
 }
-void get_event_name(unsigned int type, unsigned int code,
+void GetEventName(unsigned int type, unsigned int code,
       const char** event_name, const char** code_name) {
   *event_name = NULL;
   *code_name = NULL;
@@ -622,7 +619,7 @@ void get_event_name(unsigned int type, unsigned int code,
     }
     case EV_KEY: {
         *event_name = "EV_KEY";
-        get_key_name(code, code_name);
+        GetKeyName(code, code_name);
         break;
     }
     case EV_REL: {
@@ -783,7 +780,7 @@ void get_event_name(unsigned int type, unsigned int code,
     }
     case EV_PWR: {
         *event_name = "EV_PWR";
-        get_key_name(code, code_name);
+        GetKeyName(code, code_name);
         break;
     }
     case EV_FF_STATUS: {
@@ -796,5 +793,3 @@ void get_event_name(unsigned int type, unsigned int code,
     }
   }
 }
-
-#endif  // INCLUDED_UNIVERSAL_INPUT_INFO_STRINGS_H
