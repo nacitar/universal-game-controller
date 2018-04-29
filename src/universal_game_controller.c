@@ -158,9 +158,17 @@ void DeviceNameRelease(struct DeviceGroup* group,
 }
 
 // scales the value into the range of a __u32
-__u32 NormalizeValue(__u32 value, __s32 minimum, __s32 maximum) {
-  return (__u32)((__u64)((__s64)value - minimum) * (((__u64)1 << 32) - 1) /
-      (__u64)((__s64)maximum - minimum));
+__u32 NormalizeValue(__s32 value, __s32 low, __s32 high) {
+  if (high < low) {
+    return U32_MAX - NormalizeValue(value, high, low);
+  }
+  if (value < low) {
+    value = low;
+  } else if (value > high) {
+    value = high;
+  }
+  return (__u64)((__s64)value - low) * (__u64)U32_MAX /
+      (__u64)((__s64)high - low);
 }
 
 static struct DeviceGroup g_device_group = {0};
@@ -265,9 +273,9 @@ static void EventHandler(struct input_handle *handle, unsigned int type, unsigne
     if (type == EV_REL) {
         struct input_absinfo* absinfo = device->dev->absinfo + code;
         if (value < 0) {
-          // TODO check absolute negative to ensure output is positive
           this_input.positive = false;
-          this_input.value = NormalizeValue(0 - value, 0, -absinfo->minimum);
+          // TODO: check absinfo->value vs value; prefer abs if match
+          this_input.value = NormalizeValue(value, 0, absinfo->minimum);
         } else {
           this_input.value = NormalizeValue(value, 0, absinfo->maximum);
         }
