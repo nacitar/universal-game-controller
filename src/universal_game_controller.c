@@ -14,6 +14,10 @@
 #include <linux/interrupt.h>
 #include <linux/gpio.h>
 
+// https://www.kernel.org/doc/Documentation/input/event-codes.txt
+// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
+// https://lwn.net/Articles/443043/
+
 MODULE_AUTHOR("Jacob McIntosh <nacitar@ubercpp.com>");
 MODULE_DESCRIPTION("Allows usage of arbitrary input devices on "
     "retro game consoles.");
@@ -22,84 +26,12 @@ MODULE_LICENSE("GPL");
 
 #define HANDLER_NAME "universal_game_controller"
 
-
-// https://lwn.net/Articles/443043/
-
-
-static irqreturn_t SnesClockRisingInterrupt(int irq, void *dev_id) {
-   unsigned long flags;
-   // disable hard interrupts (remember them in flag 'flags')
-   local_irq_save(flags);
-
-   //printk(KERN_NOTICE "Interrupt [%d] for device %s was triggered !.\n",
-   //       irq, (char *) dev_id);
-
-   // restore hard interrupts
-   local_irq_restore(flags);
-   return IRQ_HANDLED;
-}
-static irqreturn_t SnesLatchFallingInterrupt(int irq, void *dev_id) {
-   unsigned long flags;
-   // disable hard interrupts (remember them in flag 'flags')
-   local_irq_save(flags);
-
-   //printk(KERN_NOTICE "Interrupt [%d] for device %s was triggered !.\n",
-   //       irq, (char *) dev_id);
-
-   // restore hard interrupts
-   local_irq_restore(flags);
-   return IRQ_HANDLED;
-}
-
-static struct PinConfig g_snes_data = {
-  .label = "snes_data",
-  .pin_number = 11,  // BCM 17
-  .direction = kOutput,
-  .output_value = kLow,
-};
-static struct PinConfig g_snes_clock = {
-  .label = "snes_clock",
-  .pin_number = 13,  // BCM 27
-  .direction = kInput,
-  .input_irq_flags = IRQF_TRIGGER_RISING,
-  .input_irq_handler = SnesClockRisingInterrupt,
-};
-static struct PinConfig g_snes_latch = {
-  .label = "snes_latch",
-  .pin_number = 15,  // BCM 22
-  .direction = kInput,
-  .input_irq_flags = IRQF_TRIGGER_FALLING,  // rising too? to store inputs
-  .input_irq_handler = SnesLatchFallingInterrupt,
-};
-
-// Track all deviced by name, id, and physical location (not dev node)
-
-
-// https://www.kernel.org/doc/Documentation/input/event-codes.txt
-// https://github.com/torvalds/linux/blob/master/include/uapi/linux/input-event-codes.h
-
-// figure out how to handle bluetooth!
-// upon connecting, identify the controller, see if it has settings stored.
-// use the pointer to lookup the value in a sorted list(set)
-// figure out a way to enter programming mode, and setup bindings.
-// figure out a way to save those bindings
-// ignore axis movement that isn't 50% or more (how do we know extents?)
-// need some sort of external button for programming inputs and pairing.
-
-
-// input_value is type code and value
-// input_dev.absinfo
-
-
-// break axes into positive and negative directions
 #define UGC_MAX_DEVICES 256u
 #define UGC_CONFIGURE_REPEAT_COUNT 10u
 #define UGC_MAX_INPUTS 50
 #define UGC_NAME_TO_INDEX(name) (+(unsigned char)*(name))
 
-// axis < 0 and > 0 distinct inputs
-const __u32 g_UGC_MAX_VALUE = U32_MAX;
-const __u32 g_UGC_MIN_PRESSED_VALUE = U32_MAX / 2;
+const __u32 kPressedThreshold = U32_MAX / 2;
 
 enum ConfigState {
   kConnected=0, kConfiguring, kReady
@@ -116,10 +48,26 @@ struct Device {
   __u32 input_state[UGC_MAX_INPUTS];
 };
 
+// dev of null reuses the existing value
+void Device_ResetConfig(struct Device *device, struct input_dev *dev) {
+  if (likely(!dev)) {
+    dev = device->dev;
+  }
+  *device = (struct Device) {
+    .dev = dev,
+    .input_code_to_index = RB_ROOT
+  };
+}
+
 struct DeviceGroup {
   unsigned long acquiredbit[BITS_TO_LONGS(UGC_MAX_DEVICES)];
   unsigned int num_acquired;
 };
+
+static struct DeviceGroup g_device_group = {0};
+static struct Device g_devices[UGC_MAX_DEVICES];
+// TODO: support multiple later?
+static struct Device *g_active_device = NULL;
 
 // 2 chars, [0] = a char id, [1] = null terminator
 // Index 0 is "\0", empty string... but valid still.
@@ -157,6 +105,92 @@ void DeviceNameRelease(struct DeviceGroup* group,
   }
 }
 
+static irqreturn_t SnesLatchChangedInterrupt(int irq, void *dev_id);
+static irqreturn_t SnesClockRisingInterrupt(int irq, void *dev_id);
+
+static struct PinConfig g_snes_data = {
+  .label = "snes_data",
+  .pin_number = 11,  // BCM 17
+  .direction = kOutput,
+  .output_value = kLow,
+};
+static struct PinConfig g_snes_clock = {
+  .label = "snes_clock",
+  .pin_number = 13,  // BCM 27
+  .direction = kInput,
+  .input_irq_flags = IRQF_TRIGGER_RISING,
+  .input_irq_handler = SnesClockRisingInterrupt,
+};
+static struct PinConfig g_snes_latch = {
+  .label = "snes_latch",
+  .pin_number = 15,  // BCM 22
+  .direction = kInput,
+  .input_irq_flags = IRQF_TRIGGER_FALLING,  // rising too? to store inputs
+  .input_irq_handler = SnesLatchChangedInterrupt,
+};
+
+static bool g_latch_state_known = false;
+static enum PinState g_latch_state;
+static int g_cycle_index = -1;
+
+#define SNES_CYCLE_COUNT 16
+static const unsigned int kSnesCycleCount = SNES_CYCLE_COUNT;
+static bool g_latched_state[SNES_CYCLE_COUNT] = {0};
+
+static inline void SnesSendNextButton(void) {
+  gpio_set_value(g_snes_data.pin_number,
+      (int)g_latched_state[g_cycle_index]);
+  ++g_cycle_index;
+}
+
+static irqreturn_t SnesLatchChangedInterrupt(int irq, void *dev_id) {
+  unsigned long flags;
+  // disable hard interrupts (remember them in flag 'flags')
+  local_irq_save(flags);
+
+  if (unlikely(!g_latch_state_known)) {
+    g_latch_state_known = true;
+    g_latch_state = (enum PinState)(
+        gpio_get_value(g_snes_latch.pin_number) != 0);
+  } else {
+    g_latch_state = (enum PinState)(!g_latch_state);
+  }
+  // timing is less strict for the rise than the fall
+  if (unlikely(g_latch_state)) {
+    // TODO: optimize this?
+    const __u32 * const current_state = g_active_device->input_state;
+    // rising edge: save state, initialize offset
+    int i;
+    for (i=0; i < kSnesCycleCount; ++i) {
+      // For SNES, pressed == low, so inverting the check.
+      g_latched_state[i] = (current_state[i] <= kPressedThreshold);
+    }
+    g_cycle_index = 0;
+  } else {
+    // send first button state
+    SnesSendNextButton();
+  }
+  // restore hard interrupts
+  local_irq_restore(flags);
+  return IRQ_HANDLED;
+}
+
+static irqreturn_t SnesClockRisingInterrupt(int irq, void *dev_id) {
+  unsigned long flags;
+  // disable hard interrupts (remember them in flag 'flags')
+  local_irq_save(flags);
+  if (likely(g_cycle_index < kSnesCycleCount)) {
+    // send next button state
+    SnesSendNextButton();
+  } else {
+    gpio_set_value(g_snes_data.pin_number, (int)kLow);
+  }
+  // restore hard interrupts
+  local_irq_restore(flags);
+  return IRQ_HANDLED;
+}
+
+
 // scales the value into the range of a __u32
 __u32 NormalizeValue(__s32 value, __s32 low, __s32 high) {
   if (high < low) {
@@ -170,9 +204,6 @@ __u32 NormalizeValue(__s32 value, __s32 low, __s32 high) {
   return (__u64)((__s64)value - low) * (__u64)U32_MAX /
       (__u64)((__s64)high - low);
 }
-
-static struct DeviceGroup g_device_group = {0};
-static struct Device g_devices[UGC_MAX_DEVICES];
 
 
 static int ConnectDevice(struct input_handler *handler, struct input_dev *dev,
@@ -204,10 +235,7 @@ static int ConnectDevice(struct input_handler *handler, struct input_dev *dev,
   if (error)
     goto err_unregister_handle;
 
-  g_devices[UGC_NAME_TO_INDEX(device_name)] = (struct Device) {
-    .dev = dev,
-    .input_code_to_index = RB_ROOT
-  };
+  Device_ResetConfig(g_devices + UGC_NAME_TO_INDEX(device_name), dev);
 
   GetBusName(dev->id.bustype, &bus_name);
 
@@ -248,16 +276,16 @@ static void DisconnectDevice(struct input_handle *handle)
 
 static void EventHandler(struct input_handle *handle, unsigned int type, unsigned int code, int value)
 {
-  const char *event_name, *code_name, *bus_name;
   struct Device *device;
-  GetEventName(type, code, &event_name, &code_name);
-  GetBusName(handle->dev->id.bustype, &bus_name);
-  if (!event_name) {
-    event_name = "UNKNOWN";
-  }
-  if (!code_name) {
-    code_name = "UNKNOWN";
-  }
+  //const char *event_name, *code_name, *bus_name;
+  //GetEventName(type, code, &event_name, &code_name);
+  //GetBusName(handle->dev->id.bustype, &bus_name);
+  //if (!event_name) {
+  //  event_name = "UNKNOWN";
+  //}
+  //if (!code_name) {
+  //  code_name = "UNKNOWN";
+  //}
   //printk(KERN_DEBUG pr_fmt("Event. Dev: %s, Type: %s[%d], Code: %s[%d], Value: %d\n"),
   //    dev_name(&handle->dev->dev), event_name, type, code_name, code, value);
 
@@ -283,8 +311,8 @@ static void EventHandler(struct input_handle *handle, unsigned int type, unsigne
       this_input.value = NormalizeValue(value, 0, 1);
     }
 
-    if (device->config_state != kReady &&
-        this_input.value >= g_UGC_MIN_PRESSED_VALUE) {
+    if (unlikely(device->config_state != kReady &&
+        this_input.value >= kPressedThreshold)) {
       if (device->config_state == kConnected) {
         if (InputState_Compare(&device->last_input, &this_input) == 0) {
           if (++device->count == 10) {
@@ -315,10 +343,14 @@ static void EventHandler(struct input_handle *handle, unsigned int type, unsigne
         }
         ++device->count;
         if (is_terminal) {
+          struct Device *old_device;
           device->config_state = kReady;
+          old_device = g_active_device;
+          g_active_device = device;
+          Device_ResetConfig(old_device, NULL);
         }
       }
-    } else if (device->config_state == kReady) {
+    } else if (likely(device->config_state == kReady)) {
       struct InputState *node;
       node = InputState_Search(&device->input_code_to_index, &this_input);
       if (node) {
