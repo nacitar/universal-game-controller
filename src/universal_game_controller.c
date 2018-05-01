@@ -129,13 +129,13 @@ static struct PinConfig g_snes_latch = {
   .input_irq_handler = SnesLatchChangedInterrupt,
 };
 
-static bool g_latch_state_known = false;
-static enum PinState g_latch_state;
-static int g_cycle_index = -1;
-
 #define SNES_CYCLE_COUNT 16
 static const unsigned int kSnesCycleCount = SNES_CYCLE_COUNT;
 static bool g_latched_state[SNES_CYCLE_COUNT] = {0};
+static unsigned int g_cycle_index = SNES_CYCLE_COUNT;
+static bool g_latch_state_known = false;
+static enum PinState g_latch_state;
+
 
 static inline void SnesSendNextButton(void) {
   gpio_set_value(g_snes_data.pin_number,
