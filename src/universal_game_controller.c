@@ -347,7 +347,9 @@ static void EventHandler(struct input_handle *handle, unsigned int type, unsigne
           device->config_state = kReady;
           old_device = g_active_device;
           g_active_device = device;
-          Device_ResetConfig(old_device, NULL);
+          if (old_device) {
+            Device_ResetConfig(old_device, NULL);
+          }
         }
       }
     } else if (likely(device->config_state == kReady)) {
