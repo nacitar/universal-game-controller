@@ -133,7 +133,7 @@ static struct PinConfig g_snes_latch = {
 static const unsigned int kSnesCycleCount = SNES_CYCLE_COUNT;
 static bool g_latched_state[SNES_CYCLE_COUNT] = {0};
 static unsigned int g_cycle_index = SNES_CYCLE_COUNT;
-static bool g_latch_state_known = false;
+//static bool g_latch_state_known = false;
 static enum PinState g_latch_state;
 
 
@@ -148,13 +148,14 @@ static irqreturn_t SnesLatchChangedInterrupt(int irq, void *dev_id) {
   // disable hard interrupts (remember them in flag 'flags')
   local_irq_save(flags);
 
-  if (unlikely(!g_latch_state_known)) {
-    g_latch_state_known = true;
+  //if (unlikely(!g_latch_state_known)) {
+    //g_latch_state_known = true;
     g_latch_state = (enum PinState)(
         gpio_get_value(g_snes_latch.pin_number) != 0);
-  } else {
-    g_latch_state = (enum PinState)(!g_latch_state);
-  }
+  //} else {
+  //  g_latch_state = (enum PinState)(!g_latch_state);
+  //}
+
   // timing is less strict for the rise than the fall
   if (unlikely(g_latch_state)) {
     // TODO: optimize this?
