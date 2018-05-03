@@ -376,12 +376,43 @@ static struct input_handler g_InputHandler = {
   .id_table =	g_id_match_table,
 };
 
+static bool g_is_snes_gpio = false;
+
+static bool setup_snes_gpio(void) {
+  if (g_is_snes_gpio) {
+    return true;
+  }
+  if (!PinConfig_Setup(&g_snes_data)) {
+    return false;
+  }
+  if (!PinConfig_Setup(&g_snes_clock)) {
+    goto err_release_data;
+  }
+  if (!PinConfig_Setup(&g_snes_latch)) {
+    goto err_release_clock;
+  }
+  g_is_snes_gpio = true;
+  return true;
+err_release_clock:
+  PinConfig_Release(&g_snes_clock);
+err_release_data:
+  PinConfig_Release(&g_snes_data);
+  return false;
+}
+static void release_snes_gpio(void) {
+  if (g_is_snes_gpio) {
+    PinConfig_Release(&g_snes_latch);
+    PinConfig_Release(&g_snes_clock);
+    PinConfig_Release(&g_snes_data);
+    g_is_snes_gpio = false;
+  }
+}
+
+static bool g_is_handler_registered = false;
 static int __init Init(void)
 {
-  if (
-      PinConfig_Setup(&g_snes_data) &&
-      PinConfig_Setup(&g_snes_clock) &&
-      PinConfig_Setup(&g_snes_latch)) {
+  if (setup_snes_gpio()) {
+    g_is_handler_registered = true;
     return input_register_handler(&g_InputHandler);
   }
   return -1;
@@ -389,10 +420,10 @@ static int __init Init(void)
 
 static void __exit Exit(void)
 {
-  input_unregister_handler(&g_InputHandler);
-  PinConfig_Release(&g_snes_data);
-  PinConfig_Release(&g_snes_clock);
-  PinConfig_Release(&g_snes_latch);
+  release_snes_gpio();
+  if (g_is_handler_registered) {
+    input_unregister_handler(&g_InputHandler);
+  }
 }
 
 module_init(Init);
