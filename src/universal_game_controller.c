@@ -192,18 +192,27 @@ static irqreturn_t SnesClockRisingInterrupt(int irq, void *dev_id) {
 }
 
 
+#include <asm/div64.h>
 // scales the value into the range of a __u32
 __u32 NormalizeValue(__s32 value, __s32 low, __s32 high) {
   if (high < low) {
     return U32_MAX - NormalizeValue(value, high, low);
+  } else {
+    __u64 result, range;
+    if (value < low) {
+      value = low;
+    } else if (value > high) {
+      value = high;
+    }
+    //return (__u64)((__s64)value - low) * (__u64)U32_MAX /
+    //    (__u64)((__s64)high - low);
+    //
+    result = (__u64)((__s64)value - low) * (__u64)U32_MAX;
+    range = (__u64)((__s64)high - low);
+
+    do_div(result, range);
+    return (__u32)result;
   }
-  if (value < low) {
-    value = low;
-  } else if (value > high) {
-    value = high;
-  }
-  return (__u64)((__s64)value - low) * (__u64)U32_MAX /
-      (__u64)((__s64)high - low);
 }
 
 
