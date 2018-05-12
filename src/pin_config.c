@@ -5,18 +5,18 @@ bool PinConfig_HasInterrupt(struct PinConfig *config) {
           && config->input_irq_handler);
 }
 
-bool PinConfig_Setup(struct PinConfig *config) {
+int PinConfig_Setup(struct PinConfig *config) {
   int result;
   if (!gpio_is_valid(config->pin_number)) {
     printk(KERN_DEBUG pr_fmt("%s GPIO not valid: %d\n"),
         config->label, config->pin_number);
-    return false;
+    return -ENXIO;
   }
   result = gpio_request(config->pin_number, config->label);
   if (result != 0) {
     printk(KERN_DEBUG pr_fmt("%s GPIO request failed with code: %d\n"),
         config->label, result);
-    return false;
+    return result;
   }
   switch (config->direction) {
     case kInput: {
@@ -58,15 +58,16 @@ bool PinConfig_Setup(struct PinConfig *config) {
       break;
     }
     default: {
+      result = -EINVAL;
       printk(KERN_DEBUG pr_fmt("%s GPIO invalid direction: %d\n"),
           config->label, config->direction);
       goto cleanup_gpio_request;
     }
   }
-  return true;
+  return 0;
 cleanup_gpio_request:
   gpio_free(config->pin_number);
-  return false;
+  return result;
 }
 void PinConfig_Release(struct PinConfig *config) {
   switch (config->direction) {

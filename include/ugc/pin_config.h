@@ -26,7 +26,7 @@ struct PinConfig {
 };
 
 bool PinConfig_HasInterrupt(struct PinConfig *config);
-bool PinConfig_Setup(struct PinConfig *config);
+int PinConfig_Setup(struct PinConfig *config);
 void PinConfig_Release(struct PinConfig *config);
 
 #endif  // INCLUDED_UGC_PIN_CONFIG_H_

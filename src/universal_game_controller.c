@@ -95,8 +95,7 @@ const char* DeviceNameAcquire(struct DeviceGroup* group) {
   return NULL;
 }
 
-void DeviceNameRelease(struct DeviceGroup* group,
-    const char* name) {
+void DeviceNameRelease(struct DeviceGroup* group, const char* name) {
   if (test_and_clear_bit(UGC_NAME_TO_INDEX(name), group->acquiredbit)) {
     --group->num_acquired;
   } else {
@@ -125,7 +124,7 @@ static struct PinConfig g_snes_latch = {
   .label = "snes_latch",
   .pin_number = 15,  // BCM 22
   .direction = kInput,
-  .input_irq_flags = IRQF_TRIGGER_FALLING,  // rising too? to store inputs
+  .input_irq_flags = IRQF_TRIGGER_FALLING | IRQF_TRIGGER_RISING,  // rising too? to store inputs
   .input_irq_handler = SnesLatchChangedInterrupt,
 };
 
@@ -217,8 +216,7 @@ __u32 NormalizeValue(__s32 value, __s32 low, __s32 high) {
 
 
 static int ConnectDevice(struct input_handler *handler, struct input_dev *dev,
-    const struct input_device_id *id)
-{
+    const struct input_device_id *id) {
   struct input_handle *handle;
   int error;
   const char* bus_name;
@@ -390,26 +388,30 @@ static struct input_handler g_InputHandler = {
 
 static bool g_is_snes_gpio = false;
 
-static bool setup_snes_gpio(void) {
+static int setup_snes_gpio(void) {
+  int result;
   if (g_is_snes_gpio) {
-    return true;
+    return 0;
   }
-  if (!PinConfig_Setup(&g_snes_data)) {
-    return false;
+  result = PinConfig_Setup(&g_snes_data);
+  if (result != 0) {
+    return result;
   }
-  if (!PinConfig_Setup(&g_snes_clock)) {
+  result = PinConfig_Setup(&g_snes_clock);
+  if (result != 0) {
     goto err_release_data;
   }
-  if (!PinConfig_Setup(&g_snes_latch)) {
+  result = PinConfig_Setup(&g_snes_latch);
+  if (result != 0) {
     goto err_release_clock;
   }
   g_is_snes_gpio = true;
-  return true;
+  return 0;
 err_release_clock:
   PinConfig_Release(&g_snes_clock);
 err_release_data:
   PinConfig_Release(&g_snes_data);
-  return false;
+  return result;
 }
 static void release_snes_gpio(void) {
   if (g_is_snes_gpio) {
@@ -421,8 +423,7 @@ static void release_snes_gpio(void) {
 }
 
 static bool g_is_handler_registered = false;
-static int __init Init(void)
-{
+static int __init Init(void) {
   if (setup_snes_gpio()) {
     g_is_handler_registered = true;
     return input_register_handler(&g_InputHandler);
@@ -430,8 +431,7 @@ static int __init Init(void)
   return -1;
 }
 
-static void __exit Exit(void)
-{
+static void __exit Exit(void) {
   release_snes_gpio();
   if (g_is_handler_registered) {
     input_unregister_handler(&g_InputHandler);
